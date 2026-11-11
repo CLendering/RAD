@@ -28,6 +28,17 @@ def main():
     parser.add_argument("--baseline", type=Path, required=True)
     parser.add_argument("--candidate", type=Path, required=True)
     args = parser.parse_args()
+    bprotocol = json.loads((args.baseline / "evaluation-inputs.json").read_text())
+    cprotocol = json.loads((args.candidate / "evaluation-inputs.json").read_text())
+    keys = ("bank_manifest_sha256", "checkpoint_sha256", "encoder_name",
+            "layers", "image_size", "crop_size", "h5_direct_448",
+            "preprocessing", "k_image", "resize_mask", "max_ratio",
+            "use_positional_bank", "pos_radius", "layer_weights")
+    mismatched = {key: (bprotocol.get(key), cprotocol.get(key))
+                  for key in keys if bprotocol.get(key) != cprotocol.get(key)}
+    if mismatched:
+        raise ValueError("Cannot compare differing scientific protocols: " +
+                         json.dumps(mismatched, default=str))
     bm, bmaps, bscores, blabels = inspect(args.baseline)
     cm, cmaps, cscores, clabels = inspect(args.candidate)
     if bmaps.shape != cmaps.shape:
