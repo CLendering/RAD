@@ -122,6 +122,9 @@ elif [[ "${STAGE}" == eval ]]; then
         --k_image "${K}" --resize_mask 256 --max_ratio 0.01 \
         --vis_max 0 --use_positional_bank --pos_radius "${R}" \
         --batch_size "${RAD_EVAL_BATCH:-8}" --num_workers 4 \
+        --reference-chunk-size "${RAD_REF_CHUNK:-8}" \
+        --query-patch-chunk-size "${RAD_QUERY_CHUNK:-32}" \
+        --memory-workspace-mib "${RAD_WORKSPACE_MIB:-256}" \
         --item_list "${CATEGORIES[@]}" "${EVAL_EXTRA[@]}" "${RESUME[@]}"
   else
     echo "Evaluation already complete: ${OUT}"
