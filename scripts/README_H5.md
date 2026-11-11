@@ -68,3 +68,23 @@ construct the memory bank, rank CLS neighbors, match patches, generate maps,
 and compute its seven metrics. No per-category retrieval restrictions or
 coresets are introduced. Object-level scoring uses exactly CoBRA's object
 identifiers and the top 1% of concatenated view-map pixels.
+
+## Matched-input 448 protocol
+
+The two Real-IAD HDF5 packs contain 448x448 bicubic-resized images. By default
+the Snellius workflow now sets `RAD_DIRECT_448=auto`: Real-IAD and Real-IAD
+Variety use `get_data_transforms(448,448)` for both bank extraction and query
+evaluation (the Resize and CenterCrop operations are both 448x448 identities).
+This avoids resampling prepared images to 512 and cropping them back to 448.
+Other datasets preserve RAD's original 512->448 input geometry.
+
+Use `RAD_DIRECT_448=0` to evaluate RAD's *nominal* published 512->448 transform
+on the pre-resized 448 HDF5 inputs, but neither mode exactly reproduces published
+Real-IAD input preprocessing on original 1024-resolution source images.
+Use `RAD_DIRECT_448=1` to request the matched-input 448 protocol explicitly.
+
+Banks, output names, and provenance distinguish `direct448` from
+`resize512crop448`. Both protocols have 28x28 patch grids and the same
+theoretical FP32 bank storage. Do not compare mAD between them without
+specifying the geometry. Retrieval and the original RAD seven metrics
+are unchanged in either protocol.
