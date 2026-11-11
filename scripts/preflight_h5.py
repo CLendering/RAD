@@ -12,7 +12,8 @@ import sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dataset import get_data_transforms
-from rad_h5 import categories_for, grouped_samples, make_training, make_test
+from rad_h5 import categories_for, grouped_samples, make_training, make_test, manifest_for
+from cobra.packed import open_image
 from cobra.data import MULTI_VIEW, object_ids
 
 ROOT = Path("/projects/0/prjs2349/datasets_h5")
@@ -40,6 +41,27 @@ for dataset, folder in ROOTS.items():
     test = grouped_samples(dataset, str(folder), "test", cats)
     observed = (len(train), len(test), len(cats))
     assert observed == EXPECTED[dataset], (dataset, observed, EXPECTED[dataset])
+    source_manifest = manifest_for(dataset, str(folder))
+    prepared_size = source_manifest.get("prepared_size")
+    if dataset in ("realiad", "realiad_variety"):
+        assert prepared_size == 448, (dataset, prepared_size)
+        for example in (train[0], test[0]):
+            with open_image(example.image_path, example.image_ref) as im:
+                assert im.size == (448, 448), (dataset, example.image_path, im.size)
+        print(f"WARNING {dataset}: HDF5 stores bicubic-resized 448x448 inputs; "
+              "RAD 512->448 will RESAMPLE them AGAIN. This is NOT an exact "
+              "reproduction of RAD preprocessing on original full-resolution inputs.",
+              flush=True)
+    else:
+        assert prepared_size is None, (dataset, prepared_size)
+        if dataset == "manta_tiny":
+            with open_image(train[0].image_path, train[0].image_ref) as im:
+                assert im.size == (256, 256), (dataset, im.size)
+            print("INFO manta_tiny: stored images are already individual 256x256 camera views.",
+                  flush=True)
+        else:
+            print(f"INFO {dataset}: CoBRA HDF5 packer preserved the original "
+                  "encoded images (prepared_size=null).", flush=True)
     assert all(s.label == 0 and s.mask_path is None for s in train), dataset
     subset = [train[0], train[-1]]
     ds, sample_refs, records = make_training(dataset, str(folder), cats, image_transform)
