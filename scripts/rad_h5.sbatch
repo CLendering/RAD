@@ -40,10 +40,6 @@ esac
 # Override the published/transferred K for sensitivity studies without
 # modifying the bank, positional radius, preprocessing or scoring.
 K="${RAD_K:-${K}}"
-REPORT_TAG="${DATASET}-bicubic448nocrop"
-if [[ -n "${RAD_K:-}" ]]; then
-  REPORT_TAG="${DATASET}-k${K}-bicubic448nocrop"
-fi
 if ! [[ "${K}" =~ ^[1-9][0-9]*$ ]]; then
   echo "RAD_K must be a positive integer; got ${K}" >&2
   exit 10
@@ -62,6 +58,10 @@ else
   PREPROC="resize512crop448"
   RESIZE=512
   EVAL_EXTRA=()
+fi
+REPORT_TAG="${DATASET}-${PREPROC}"
+if [[ -n "${RAD_K:-}" ]]; then
+  REPORT_TAG="${DATASET}-k${K}-${PREPROC}"
 fi
 WEIGHT="${RAD_WEIGHT:-${PROJECT}/weights/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth}"
 if [[ ! -f "${WEIGHT}" && -f "${REPO}/weights/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth" ]]; then
