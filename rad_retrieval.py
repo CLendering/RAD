@@ -4,6 +4,8 @@ All references and selected patches participate. No quantization, subsampling,
 approximate index, reduced precision, or changed positional neighborhood is used.
 """
 from dataclasses import dataclass
+import os
+import time
 import math
 
 import torch
@@ -33,6 +35,12 @@ class ChunkedRetriever:
         self.guard = guard
         self.peak_reference_rows = 0
         self.peak_similarity_elements = 0
+        self.profile = os.environ.get('RAD_PROFILE', '0') == '1'
+        self.image_retrieval_seconds = 0.0
+        self.patch_matching_seconds = 0.0
+        self.profiled_queries = 0
+        self.logical_cls_bytes_read = 0
+        self.logical_patch_bytes_read = 0
 
     def _check(self):
         if self.guard is not None:
@@ -79,6 +87,7 @@ class ChunkedRetriever:
             self._check()
             stop = min(start + rows, n)
             cls = self.bank.read_cls(layer, start, stop).to(self.device)
+            self.logical_cls_bytes_read += cls.numel() * cls.element_size()
             cls = F.normalize(cls, dim=-1)
             similarities[:, start:stop] = torch.matmul(query_cls, cls.t())
             del cls
@@ -198,7 +207,16 @@ class ChunkedRetriever:
             total = sum(weights)
             weights = ([w / total for w in weights] if total > 0
                        else [1.0 / len(layers)] * len(layers))
+        if self.profile:
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize(self.device)
+            image_started = time.perf_counter()
         topk = self.image_neighbors(cls_features[-1], k)
+        if self.profile:
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize(self.device)
+            self.image_retrieval_seconds += time.perf_counter() - image_started
+            patch_started = time.perf_counter()
         sorted_ids = topk.detach().cpu().sort(dim=-1).values
         unique_ids = torch.unique(sorted_ids, sorted=True)
         batch, length, channels = patch_features[0].shape
@@ -221,6 +239,7 @@ class ChunkedRetriever:
                 ids = unique_ids[start_ref:start_ref+rchunk]
                 self.peak_reference_rows = max(self.peak_reference_rows, len(ids))
                 raw = self.bank.read_patches(layer, ids.tolist())
+                self.logical_patch_bytes_read += raw.numel() * raw.element_size()
                 neighbors = F.normalize(raw.to(self.device), dim=-1)
                 del raw
                 for b in range(batch):
@@ -252,7 +271,24 @@ class ChunkedRetriever:
                 raise ValueError('Non-finite patch scores; check checkpoint and bank')
             fused = fused + weights[li] * (1.0 - best)
             del query, best
+        if self.profile:
+            if self.device.type == 'cuda':
+                torch.cuda.synchronize(self.device)
+            self.patch_matching_seconds += time.perf_counter() - patch_started
+            self.profiled_queries += batch
         return fused, topk
+
+    def timing_report(self):
+        return {
+            'profile_enabled': self.profile,
+            'profiled_queries': self.profiled_queries,
+            'image_retrieval_seconds': self.image_retrieval_seconds,
+            'patch_matching_seconds': self.patch_matching_seconds,
+            'total_retrieval_seconds': self.image_retrieval_seconds + self.patch_matching_seconds,
+            'logical_cls_bytes_read': self.logical_cls_bytes_read,
+            'logical_patch_bytes_read': self.logical_patch_bytes_read,
+            'note': 'Logical bank bytes, not physical disk IO. CUDA synchronized at stage boundaries when RAD_PROFILE=1.',
+        }
 
 
 def add_retrieval_arguments(parser):
