@@ -96,3 +96,44 @@ tested against Snellius GPUs by the assistant. Bank size across six
 datasets is approximately 2.820 TB of FP32 feature payload; scratch
 space for metric spools and external sort is additional.
 
+
+## Performance diagnosis: VisA K=900, radius=2
+
+Measured on A100 with the original bounded streaming implementation:
+200 VisA/candle images; CLS retrieval 4.619 seconds, patch matching
+2687.938 seconds, or 13.440 s/image in patch matching. Reference
+reads: 216,760,320,000 logical patch bytes across the category.
+These are not OS-level disk-read measurements.
+
+The default `reference-chunk-size=8`,
+`query-patch-chunk-size=32`, and `memory-workspace-mib=256`
+produce many small positional matching operations. On an isolated
+worktree, test 32 references / 128 query patches / 1024 MiB workspace
+with `scripts/bench_visa_chunks.sbatch`; this is **only** a
+performance-parameter change, preserving K=900, radius=2, exact FP32
+references, and the RAD scoring implementation.
+
+The benchmark compares all 200 VisA/candle 256x256 maps, image scores,
+and seven metrics with the original completed category; it refuses a
+different bank, image geometry, K, or spatial radius. Chunk changes
+may give small floating-point differences from operation ordering.
+Do not replace the original full run without measured speedup and
+numerical equivalence.
+
+To prepare without modifying the existing working tree while other
+banks are being built:
+
+```bash
+cd /projects/0/prjs2349/RAD
+git fetch origin feat/cobra-h5-six-benchmarks
+git worktree add --detach ../RAD-bench origin/feat/cobra-h5-six-benchmarks
+sbatch --partition=gpu_a100 \
+  --export=ALL,RAD_BENCH_REPO=/projects/0/prjs2349/RAD-bench \
+  ../RAD-bench/scripts/bench_visa_chunks.sbatch
+```
+
+For *future* evaluations only, the standard `scripts/rad_h5.sbatch`
+now allows `RAD_REF_CHUNK=32,RAD_QUERY_CHUNK=128,RAD_WORKSPACE_MIB=1024`;
+the defaults remain RAD's 8/32/256. Do not change the contents of the
+working tree of running jobs, since incomplete banks and evaluation
+spools validate their source signatures on resume.
