@@ -69,22 +69,30 @@ and compute its seven metrics. No per-category retrieval restrictions or
 coresets are introduced. Object-level scoring uses exactly CoBRA's object
 identifiers and the top 1% of concatenated view-map pixels.
 
-## Matched-input 448 protocol
+## All six datasets: matched-input bicubic 448², no crop
 
-The two Real-IAD HDF5 packs contain 448x448 bicubic-resized images. By default
-the Snellius workflow now sets `RAD_DIRECT_448=auto`: Real-IAD and Real-IAD
-Variety use `get_data_transforms(448,448)` for both bank extraction and query
-evaluation (the Resize and CenterCrop operations are both 448x448 identities).
-This avoids resampling prepared images to 512 and cropping them back to 448.
-Other datasets preserve RAD's original 512->448 input geometry.
+The default `scripts/rad_h5.sbatch` protocol is now
+`RAD_DIRECT_448=1` for **all six datasets**. Its bank builder and
+evaluator use `--h5-direct-448`, recorded as `bicubic448nocrop` in
+the bank and output paths. The image transform is exactly
+`torchvision.transforms.Resize((448,448), BICUBIC)` followed by
+`ToTensor()` and ImageNet `Normalize()`, with **no CenterCrop**.
+This matches CoBRA's `cobra.data.resize_image(...,448)` for all
+HDF5 samples. The preflight asserts bit-exact normalized image
+tensors for selected examples. RAD's mask transform, model, patch
+retrieval, smoothing, scoring, and original seven metrics are unchanged.
 
-Use `RAD_DIRECT_448=0` to evaluate RAD's *nominal* published 512->448 transform
-on the pre-resized 448 HDF5 inputs, but neither mode exactly reproduces published
-Real-IAD input preprocessing on original 1024-resolution source images.
-Use `RAD_DIRECT_448=1` to request the matched-input 448 protocol explicitly.
+For pre-resized 448² Real-IAD and Real-IAD Variety HDF5 images,
+Resize((448,448)) does not geometrically change the source. For MVTec,
+VisA, ADNet and MANTA views, bicubic 448 is applied once. MANTA-Tiny's
+CoBRA headline used 280² rather than 448², so do not claim this is the
+same resolution as the published CoBRA headline for that dataset.
 
-Banks, output names, and provenance distinguish `direct448` from
-`resize512crop448`. Both protocols have 28x28 patch grids and the same
-theoretical FP32 bank storage. Do not compare mAD between them without
-specifying the geometry. Retrieval and the original RAD seven metrics
-are unchanged in either protocol.
+`RAD_DIRECT_448=0` can still be used to create completely separate
+`resize512crop448` banks/results, but is not the default.
+
+Run a GPU smoke test after the CPU preflight. This branch has not been
+tested against Snellius GPUs by the assistant. Bank size across six
+datasets is approximately 2.820 TB of FP32 feature payload; scratch
+space for metric spools and external sort is additional.
+
