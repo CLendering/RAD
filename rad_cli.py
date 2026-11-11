@@ -22,7 +22,7 @@ def add_evaluation_arguments(parser):
     parser.add_argument('--h5-dataset', choices=('mvtec','visa','realiad','manta_tiny','realiad_variety','adnet'), default=None,
                         help='Load CoBRA immutable HDF5 packs without changing RAD inference')
     parser.add_argument('--h5-direct-448', action='store_true',
-                        help='Use 448x448 prepared HDF5 images directly (no 512 resize/crop); requires Real-IAD or Variety')
+                        help='Use CoBRA bicubic resize to 448x448 on any HDF5 dataset, no center crop')
     parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--metric-chunk-size', type=int, default=262144)
@@ -52,7 +52,7 @@ def dataset_signature(dataset, guard):
     return {'sha256': digest.hexdigest(), 'count': len(dataset), 'max_source_pixels': max_pixels}
 
 
-def _budget(args, bank, device, max_source_pixels=0, metrics_only=False):
+def _budget(args, bank, device, max_source_pixels=0, metrics_only=False, image_size=512, crop_size=448):
     if args.vis_max and not metrics_only:
         max_source_pixels = max(max_source_pixels, bank.provenance.get('max_source_image_pixels', 0))
     if metrics_only:
@@ -108,8 +108,8 @@ def run_evaluation(args, realiad=False, print_fn=print):
     if (not math.isfinite(args.max_ratio) or not 0 <= args.max_ratio <= 1 or
             (args.max_ratio and int(args.resize_mask ** 2 * args.max_ratio) < 1)):
         raise ValueError('max_ratio must select at least one pixel, or be 0 for max pooling')
-    if args.h5_direct_448 and args.h5_dataset not in ('realiad','realiad_variety'):
-        raise ValueError('--h5-direct-448 requires --h5-dataset realiad or realiad_variety')
+    if args.h5_direct_448 and not args.h5_dataset:
+        raise ValueError('--h5-direct-448 requires --h5-dataset')
     if args.h5_dataset in ('manta_tiny','realiad','realiad_variety') and args.cleanup_metric_spool:
         raise ValueError('Multi-view object AUROC requires retained spool maps; omit --cleanup-metric-spool')
     image_size = 448 if args.h5_direct_448 else 512
@@ -126,7 +126,7 @@ def run_evaluation(args, realiad=False, print_fn=print):
     if args.layer_weights is not None and (len(args.layer_weights) != len(bank.layers)
             or not all(math.isfinite(w) for w in args.layer_weights)):
         raise ValueError('Provide one finite --layer_weights value per bank layer')
-    estimate = _budget(args, bank, device, metrics_only=metrics_only)
+    estimate = _budget(args, bank, device, metrics_only=metrics_only, image_size=image_size, crop_size=crop_size)
     guard_args = SimpleNamespace(**vars(args))
     if metrics_only:
         guard_args.gpu_budget_gib = None  # A replayed GPU budget is irrelevant to CPU-only metric recovery.
@@ -134,12 +134,17 @@ def run_evaluation(args, realiad=False, print_fn=print):
                             device, str(run_dir / 'resources.jsonl'))
     guard.preflight()
     checkpoint_sha = checkpoint_fingerprint(args.encoder_weight)
+    if args.h5_direct_448:
+        from rad_h5 import get_direct_448_transforms, direct_448_preprocessing
+        preprocessing = direct_448_preprocessing()
+    else:
+        preprocessing = {'image_size': image_size, 'crop_size': crop_size,
+                         'resize': 'square', 'interpolation': 'bilinear',
+                         'order': ['Resize','ToTensor','CenterCrop','Normalize'],
+                         'mean': [.485,.456,.406], 'std': [.229,.224,.225]}
     bank.validate_provenance({
         'encoder': {'name': args.encoder_name, 'checkpoint_sha256': checkpoint_sha},
-        'preprocessing': {'image_size': image_size, 'crop_size': crop_size,
-                          'resize': 'square', 'interpolation': 'bilinear',
-                          'order': ['Resize','ToTensor','CenterCrop','Normalize'],
-                          'mean': [.485,.456,.406], 'std': [.229,.224,.225]},
+        'preprocessing': preprocessing,
         'feature_dtype': 'float32', 'seed': 1,
     })
     if not args.item_list or len(set(args.item_list)) != len(args.item_list):
@@ -159,12 +164,13 @@ def run_evaluation(args, realiad=False, print_fn=print):
         shape = bank.patch_shapes[bank.layers[0]]
         ChunkedRetriever(bank, device, config)._chunks(shape[1], shape[2],
             args.use_positional_bank, args.pos_radius, args.batch_size, args.batch_size * args.k_image * 8 * 5)
-    data_transform, gt_transform = get_data_transforms(image_size, crop_size)
+    data_transform, gt_transform = (get_direct_448_transforms() if args.h5_direct_448
+                                    else get_data_transforms(image_size, crop_size))
     protocol = {
         'bank_manifest_sha256': checkpoint_fingerprint(Path(args.bank_path) / 'manifest.json'),
         'checkpoint_sha256': checkpoint_sha, 'encoder_name': args.encoder_name,
         'layers': bank.layers, 'image_size': image_size, 'crop_size': crop_size, 'seed': 1,
-        'h5_direct_448': bool(args.h5_direct_448),
+        'h5_direct_448': bool(args.h5_direct_448), 'preprocessing': preprocessing,
         'k_image': args.k_image, 'resize_mask': args.resize_mask, 'max_ratio': args.max_ratio,
         'use_positional_bank': args.use_positional_bank, 'pos_radius': args.pos_radius,
         'layer_weights': args.layer_weights, 'dataset_kind': 'CoBRA-HDF5:'+args.h5_dataset if args.h5_dataset else ('Real-IAD' if realiad else 'MVTec-format'),
@@ -208,7 +214,8 @@ def run_evaluation(args, realiad=False, print_fn=print):
         signature = {**protocol, 'category': item, 'dataset': dataset_signature(test_data, guard)}
         metric_dir = run_dir / 'metrics' / item
         prepare_signature(metric_dir, signature, resume=args.resume_eval, create=False)
-        estimate = _budget(args, bank, device, signature['dataset']['max_source_pixels'], metrics_only)
+        estimate = _budget(args, bank, device, signature['dataset']['max_source_pixels'], metrics_only,
+                           image_size=image_size, crop_size=crop_size)
         print_fn('Resource estimate (not measured): ' + json.dumps(estimate, sort_keys=True))
         # Updating category/decode bounds does not reset the paging baseline.
         if args.ram_budget_gib is None:
