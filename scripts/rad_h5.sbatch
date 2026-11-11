@@ -37,24 +37,14 @@ case "${DATASET}" in
   adnet) ROOT="${PROJECT}/datasets_h5/ADNet"; K=150; R=1 ;;
   *) echo "Unknown dataset ${DATASET}" >&2; exit 2 ;;
 esac
-# Match CoBRA's already-prepared 448x448 inputs for the two Real-IAD variants.
-# RAD_DIRECT_448=0 restores RAD's published 512->448 geometry as a separate run.
-DIRECT_448="${RAD_DIRECT_448:-auto}"
-if [[ "${DIRECT_448}" == auto ]]; then
-  if [[ "${DATASET}" == realiad || "${DATASET}" == realiad_variety ]]; then
-    DIRECT_448=1
-  else
-    DIRECT_448=0
-  fi
-fi
+# Match CoBRA's bicubic 448x448 input geometry for ALL datasets.
+# RAD_DIRECT_448=0 still allows a separate official RAD 512->448 run.
+DIRECT_448="${RAD_DIRECT_448:-1}"
 if [[ "${DIRECT_448}" != 0 && "${DIRECT_448}" != 1 ]]; then
-  echo "RAD_DIRECT_448 must be 0, 1 or auto" >&2; exit 8
-fi
-if [[ "${DIRECT_448}" == 1 && "${DATASET}" != realiad && "${DATASET}" != realiad_variety ]]; then
-  echo "Direct 448 only supports Real-IAD / Real-IAD Variety packs" >&2; exit 9
+  echo "RAD_DIRECT_448 must be 0 or 1" >&2; exit 8
 fi
 if [[ "${DIRECT_448}" == 1 ]]; then
-  PREPROC="direct448"
+  PREPROC="bicubic448nocrop"
   RESIZE=448
   EVAL_EXTRA=(--h5-direct-448)
 else
@@ -97,6 +87,7 @@ if [[ "${STAGE}" == bank ]]; then
         --encoder_name dinov3_vitb16 \
         --encoder_weight "${WEIGHT}" \
         --image_size "${RESIZE}" --crop_size 448 \
+        "${EVAL_EXTRA[@]}" \
         --layer_idx_list 3 6 9 11 \
         --batch_size "${RAD_BANK_BATCH:-32}" --num_workers 4 \
         --bank_path "${BANK}" "${RESUME[@]}"
