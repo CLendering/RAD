@@ -24,6 +24,35 @@ INPUT_SIZE = 448
 _SAMPLE_CACHE = {}
 
 
+def direct_448_preprocessing():
+    """Provenance shared by the HDF5 bank builder and evaluator."""
+    return {
+        "image_size": 448, "crop_size": 448, "resize": "square",
+        "interpolation": "bicubic",
+        "order": ["Resize", "ToTensor", "Normalize"],
+        "mean": [0.485, 0.456, 0.406], "std": [0.229, 0.224, 0.225],
+    }
+
+
+def get_direct_448_transforms():
+    """Match cobra.data.resize_image and its 448x448 pixel geometry.
+
+    For pre-resized Real-IAD packs this resize is an identity operation.
+    For MVTec, VisA, ADNet, and MANTA views, it matches CoBRA's bicubic resize.
+    No center crop is applied. RAD's mask transform is retained.
+    """
+    from torchvision import transforms as T
+    from torchvision.transforms import InterpolationMode
+    image = T.Compose([
+        T.Resize((448, 448), interpolation=InterpolationMode.BICUBIC),
+        T.ToTensor(),
+        T.Normalize(mean=[0.485, 0.456, 0.406],
+                    std=[0.229, 0.224, 0.225]),
+    ])
+    mask = T.Compose([T.Resize((448, 448)), T.ToTensor()])
+    return image, mask
+
+
 def manifest_for(dataset: str, root: str):
     if dataset not in DATASETS:
         raise ValueError(f"Unknown CoBRA dataset {dataset!r}")
