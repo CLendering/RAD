@@ -37,6 +37,13 @@ case "${DATASET}" in
   adnet) ROOT="${PROJECT}/datasets_h5/ADNet"; K=150; R=1 ;;
   *) echo "Unknown dataset ${DATASET}" >&2; exit 2 ;;
 esac
+# Override the published/transferred K for sensitivity studies without
+# modifying the bank, positional radius, preprocessing or scoring.
+K="${RAD_K:-${K}}"
+if ! [[ "${K}" =~ ^[1-9][0-9]*$ ]]; then
+  echo "RAD_K must be a positive integer; got ${K}" >&2
+  exit 10
+fi
 # Match CoBRA's bicubic 448x448 input geometry for ALL datasets.
 # RAD_DIRECT_448=0 still allows a separate official RAD 512->448 run.
 DIRECT_448="${RAD_DIRECT_448:-1}"
