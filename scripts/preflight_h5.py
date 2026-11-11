@@ -6,6 +6,10 @@ five-view object identity, and stable sample signatures before GPU allocation.
 from collections import Counter, defaultdict
 from pathlib import Path
 import json
+import sys
+
+# Direct execution by path puts scripts/, not the RAD root, on sys.path.
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from dataset import get_data_transforms
 from rad_h5 import categories_for, grouped_samples, make_training, make_test
