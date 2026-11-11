@@ -16,9 +16,9 @@ case "$DATASET" in
   mvtec) ORIGINAL_K=150; R=1 ;;
   visa) ORIGINAL_K=900; R=2 ;;
   realiad) ORIGINAL_K=900; R=0 ;;
-  manta_tiny) ORIGINAL_K=150; R=1 ;;
-  realiad_variety) ORIGINAL_K=900; R=0 ;;
-  adnet) ORIGINAL_K=150; R=1 ;;
+  manta_tiny) ORIGINAL_K=256; R=1 ;;
+  realiad_variety) ORIGINAL_K=256; R=0 ;;
+  adnet) ORIGINAL_K=256; R=1 ;;
   *) echo "Unknown dataset: $DATASET" >&2; exit 4 ;;
 esac
 
