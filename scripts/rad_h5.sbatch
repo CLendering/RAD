@@ -40,6 +40,10 @@ esac
 # Override the published/transferred K for sensitivity studies without
 # modifying the bank, positional radius, preprocessing or scoring.
 K="${RAD_K:-${K}}"
+REPORT_TAG="${DATASET}-bicubic448nocrop"
+if [[ -n "${RAD_K:-}" ]]; then
+  REPORT_TAG="${DATASET}-k${K}-bicubic448nocrop"
+fi
 if ! [[ "${K}" =~ ^[1-9][0-9]*$ ]]; then
   echo "RAD_K must be a positive integer; got ${K}" >&2
   exit 10
@@ -123,8 +127,8 @@ elif [[ "${STAGE}" == eval ]]; then
     echo "Evaluation already complete: ${OUT}"
   fi
   python scripts/report_h5.py --bank "${BANK}" --evaluation "${OUT}" \
-      --output "${PROJECT}/rad_results/${DATASET}-${PREPROC}-evaluation.json"
-  cp "${OUT}/summary.json" "${PROJECT}/rad_results/${DATASET}-${PREPROC}-summary.json"
+      --output "${PROJECT}/rad_results/${REPORT_TAG}-evaluation.json"
+  cp "${OUT}/summary.json" "${PROJECT}/rad_results/${REPORT_TAG}-summary.json"
 else
   echo "STAGE must be bank or eval" >&2; exit 7
 fi
