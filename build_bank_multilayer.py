@@ -126,6 +126,8 @@ def main():
     parser.add_argument('--data_path', type=str, default='../mvtec_anomaly_detection')
     parser.add_argument('--h5-dataset', choices=('mvtec','visa','realiad','manta_tiny','realiad_variety','adnet'), default=None,
                         help='Read immutable CoBRA HDF5 packs under data_path/h5_dataset; retain RAD defaults')
+    parser.add_argument('--h5-direct-448', action='store_true',
+                        help='Match CoBRA bicubic 448x448 image preprocessing without a center crop')
     parser.add_argument('--item_list', nargs='+', default=[
         'carpet', 'grid', 'leather', 'tile', 'wood',
         'bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut',
@@ -152,6 +154,8 @@ def main():
     args = parser.parse_args()
 
     setup_seed(1)
+    if args.h5_direct_448 and (not args.h5_dataset or args.image_size != 448 or args.crop_size != 448):
+        raise ValueError('--h5-direct-448 requires an HDF5 dataset with image_size=crop_size=448')
 
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     print("device:", device)
@@ -166,7 +170,13 @@ def main():
     guard.preflight()
 
     # Data augmentation (consistent with training)
-    data_transform, _ = get_data_transforms(args.image_size, args.crop_size)
+    if args.h5_direct_448:
+        from rad_h5 import get_direct_448_transforms, direct_448_preprocessing
+        data_transform, _ = get_direct_448_transforms()
+        preprocessing = direct_448_preprocessing()
+    else:
+        data_transform, _ = get_data_transforms(args.image_size, args.crop_size)
+        preprocessing = None
 
     # All normal observations, one category-agnostic bank. HDF5 uses only
     # CoBRA's immutable image/record adapter, never CoBRA's scoring.
@@ -196,7 +206,7 @@ def main():
     provenance = build_provenance(encoder_name=args.encoder_name, checkpoint_path=args.encoder_weight,
                                   image_size=args.image_size, crop_size=args.crop_size, categories=args.item_list,
                                   reference_records=(reference(i) for i in range(len(train_data))),
-                                  source_file=__file__, guard=guard)
+                                  source_file=__file__, guard=guard, preprocessing=preprocessing)
     estimate = estimate_build_resources(encoder_name=args.encoder_name, checkpoint_path=args.encoder_weight,
         batch_size=args.batch_size, image_size=args.image_size, crop_size=args.crop_size,
         layers=args.layer_idx_list, num_workers=args.num_workers, device=device,
