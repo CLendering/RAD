@@ -19,6 +19,8 @@ from rad_retrieval import ChunkedRetriever, add_retrieval_arguments, config_from
 
 
 def add_evaluation_arguments(parser):
+    parser.add_argument('--h5-dataset', choices=('mvtec','visa','realiad','manta_tiny','realiad_variety','adnet'), default=None,
+                        help='Load CoBRA immutable HDF5 packs without changing RAD inference')
     parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--metric-chunk-size', type=int, default=262144)
@@ -29,6 +31,8 @@ def add_evaluation_arguments(parser):
 
 
 def dataset_signature(dataset, guard):
+    if hasattr(dataset, 'h5_signature'):
+        return dataset.h5_signature()
     digest = hashlib.sha256()
     max_pixels = 0
     for i in range(len(dataset)):
@@ -102,6 +106,8 @@ def run_evaluation(args, realiad=False, print_fn=print):
     if (not math.isfinite(args.max_ratio) or not 0 <= args.max_ratio <= 1 or
             (args.max_ratio and int(args.resize_mask ** 2 * args.max_ratio) < 1)):
         raise ValueError('max_ratio must select at least one pixel, or be 0 for max pooling')
+    if args.h5_dataset in ('manta_tiny','realiad','realiad_variety') and args.cleanup_metric_spool:
+        raise ValueError('Multi-view object AUROC requires retained spool maps; omit --cleanup-metric-spool')
     config = config_from_args(args)
     config.validate()
     run_dir = Path(args.save_dir) / args.save_name
@@ -154,10 +160,12 @@ def run_evaluation(args, realiad=False, print_fn=print):
         'layers': bank.layers, 'image_size': 512, 'crop_size': 448, 'seed': 1,
         'k_image': args.k_image, 'resize_mask': args.resize_mask, 'max_ratio': args.max_ratio,
         'use_positional_bank': args.use_positional_bank, 'pos_radius': args.pos_radius,
-        'layer_weights': args.layer_weights, 'dataset_kind': 'Real-IAD' if realiad else 'MVTec-format',
+        'layer_weights': args.layer_weights, 'dataset_kind': 'CoBRA-HDF5:'+args.h5_dataset if args.h5_dataset else ('Real-IAD' if realiad else 'MVTec-format'),
         'implementation': {name: checkpoint_fingerprint(Path(__file__).parent / name)
                            for name in ('rad_retrieval.py','rad_metrics.py','rad_evaluation.py','dataset.py')},
     }
+    if args.h5_dataset:
+        protocol['implementation']['rad_h5.py'] = checkpoint_fingerprint(Path(__file__).parent / 'rad_h5.py')
     # Reject conflicting existing runs across every category before any model
     # allocation; per-category image fingerprints are checked immediately before
     # that category executes, without retaining all datasets in host memory.
@@ -174,9 +182,15 @@ def run_evaluation(args, realiad=False, print_fn=print):
             raise FileExistsError('Existing evaluation category has no provenance; use a new save_name')
     encoder = None
     all_results = []
+    object_results = {}
+    category_mad = {}
     for item in args.item_list:
         guard.check()
-        if realiad:
+        if args.h5_dataset:
+            from rad_h5 import make_test
+            test_data = make_test(args.h5_dataset, args.data_path, item,
+                                  data_transform, gt_transform)
+        elif realiad:
             test_data = RealIADDataset(root=args.data_path, category=item,
                 transform=data_transform, gt_transform=gt_transform, phase='test')
         else:
@@ -228,12 +242,30 @@ def run_evaluation(args, realiad=False, print_fn=print):
                 layer_weights=args.layer_weights, retrieval_config=config, guard=guard,
                 metric_chunk_size=args.metric_chunk_size, resume=args.resume_eval,
                 cleanup_metric_spool=args.cleanup_metric_spool)
+        if args.h5_dataset in ('manta_tiny', 'realiad', 'realiad_variety'):
+            from rad_h5 import object_auroc
+            obj, obj_details = object_auroc(args.h5_dataset, test_data.samples,
+                                           metric_dir, fraction=args.max_ratio)
+            object_results[item] = obj
+            category_mad[item] = float(np.mean([obj, *results]))
+            atomic_json(metric_dir / 'object-metrics.json',
+                        {'O-AUROC': obj, 'mAD': category_mad[item], **obj_details})
+            print_fn(f'{item}: O-AUROC={obj:.4f}, mAD-8={category_mad[item]:.4f}')
+        else:
+            category_mad[item] = float(np.mean(results))
         all_results.append(results)
         print_fn(f'{item}: ' + ', '.join(f'{name}:{value:.4f}' for name,value in zip(
             ('I-AUROC','I-AP','I-F1','P-AUROC','P-AP','P-F1','P-AUPRO'), results)))
     mean = np.mean(all_results, axis=0).tolist()
-    atomic_json(run_dir / 'summary.json', {'categories': args.item_list, 'results': all_results, 'mean': mean,
-                                         'protocol': protocol})
+    report = {'categories': args.item_list, 'results': all_results, 'mean': mean,
+              'protocol': protocol, 'category_mad': category_mad,
+              'mAD': float(np.mean(list(category_mad.values()))),
+              'mAD_metrics': 8 if object_results else 7}
+    if object_results:
+        report['O-AUROC'] = float(np.mean(list(object_results.values())))
+        report['category_O-AUROC'] = object_results
+    atomic_json(run_dir / 'summary.json', report)
     print_fn('Mean: ' + ', '.join(f'{name}:{value:.4f}' for name,value in zip(
         ('I-AUROC','I-AP','I-F1','P-AUROC','P-AP','P-F1','P-AUPRO'), mean)))
+    print_fn(f"mAD-{8 if object_results else 7}: {report['mAD']:.4f} (multiply by 100 for percentages)")
     return mean
