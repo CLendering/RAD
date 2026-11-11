@@ -21,6 +21,7 @@ from cobra.data import DATASETS, MULTI_VIEW, dataset_samples, object_ids
 from cobra.packed import load_manifest, open_image, pack_folder
 
 INPUT_SIZE = 448
+_SAMPLE_CACHE = {}
 
 
 def manifest_for(dataset: str, root: str):
@@ -35,10 +36,14 @@ def categories_for(dataset: str, root: str):
 
 
 def grouped_samples(dataset: str, root: str, split: str, categories: list[str]):
-    rows = dataset_samples(dataset, root, split, INPUT_SIZE)
-    by_category = defaultdict(list)
-    for sample in rows:
-        by_category[sample.category].append(sample)
+    key = (dataset, str(Path(root).resolve()), split)
+    if key not in _SAMPLE_CACHE:
+        rows = dataset_samples(dataset, root, split, INPUT_SIZE)
+        by_category = defaultdict(list)
+        for sample in rows:
+            by_category[sample.category].append(sample)
+        _SAMPLE_CACHE[key] = by_category
+    by_category = _SAMPLE_CACHE[key]
     missing = set(categories) - set(by_category)
     if missing:
         raise ValueError(f"{dataset}/{split}: no samples for {sorted(missing)}")
@@ -186,3 +191,13 @@ def object_auroc(dataset: str, samples, metric_dir: str, fraction=0.01):
         raise ValueError("Object AUROC needs normal and anomalous objects")
     return float(roc_auc_score(labels, scores)), dict(
         objects=len(groups), views_per_object=dict(sorted(counts.items())))
+
+if __name__ == "__main__":
+    import argparse
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dataset", choices=DATASETS, required=True)
+    parser.add_argument("--data-path", required=True)
+    parser.add_argument("--categories", action="store_true")
+    args = parser.parse_args()
+    for cat in categories_for(args.dataset, args.data_path):
+        print(cat)
