@@ -21,6 +21,8 @@ from rad_retrieval import ChunkedRetriever, add_retrieval_arguments, config_from
 def add_evaluation_arguments(parser):
     parser.add_argument('--h5-dataset', choices=('mvtec','visa','realiad','manta_tiny','realiad_variety','adnet'), default=None,
                         help='Load CoBRA immutable HDF5 packs without changing RAD inference')
+    parser.add_argument('--h5-direct-448', action='store_true',
+                        help='Use 448x448 prepared HDF5 images directly (no 512 resize/crop); requires Real-IAD or Variety')
     parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--num_workers', type=int, default=4)
     parser.add_argument('--metric-chunk-size', type=int, default=262144)
@@ -59,7 +61,7 @@ def _budget(args, bank, device, max_source_pixels=0, metrics_only=False):
     else:
         estimate = estimate_build_resources(encoder_name=args.encoder_name,
             checkpoint_path=args.encoder_weight, batch_size=args.batch_size,
-            image_size=512, crop_size=448, layers=bank.layers,
+            image_size=image_size, crop_size=crop_size, layers=bank.layers,
             num_workers=args.num_workers, device=device, max_source_pixels=max_source_pixels)
     # Sort temporary arrays (argsort, gathered records, groups, merge buffers).
     # Highly fragmented masks also create many regionprops Python objects,
@@ -106,8 +108,12 @@ def run_evaluation(args, realiad=False, print_fn=print):
     if (not math.isfinite(args.max_ratio) or not 0 <= args.max_ratio <= 1 or
             (args.max_ratio and int(args.resize_mask ** 2 * args.max_ratio) < 1)):
         raise ValueError('max_ratio must select at least one pixel, or be 0 for max pooling')
+    if args.h5_direct_448 and args.h5_dataset not in ('realiad','realiad_variety'):
+        raise ValueError('--h5-direct-448 requires --h5-dataset realiad or realiad_variety')
     if args.h5_dataset in ('manta_tiny','realiad','realiad_variety') and args.cleanup_metric_spool:
         raise ValueError('Multi-view object AUROC requires retained spool maps; omit --cleanup-metric-spool')
+    image_size = 448 if args.h5_direct_448 else 512
+    crop_size = 448
     config = config_from_args(args)
     config.validate()
     run_dir = Path(args.save_dir) / args.save_name
@@ -130,7 +136,7 @@ def run_evaluation(args, realiad=False, print_fn=print):
     checkpoint_sha = checkpoint_fingerprint(args.encoder_weight)
     bank.validate_provenance({
         'encoder': {'name': args.encoder_name, 'checkpoint_sha256': checkpoint_sha},
-        'preprocessing': {'image_size': 512, 'crop_size': 448,
+        'preprocessing': {'image_size': image_size, 'crop_size': crop_size,
                           'resize': 'square', 'interpolation': 'bilinear',
                           'order': ['Resize','ToTensor','CenterCrop','Normalize'],
                           'mean': [.485,.456,.406], 'std': [.229,.224,.225]},
@@ -153,11 +159,12 @@ def run_evaluation(args, realiad=False, print_fn=print):
         shape = bank.patch_shapes[bank.layers[0]]
         ChunkedRetriever(bank, device, config)._chunks(shape[1], shape[2],
             args.use_positional_bank, args.pos_radius, args.batch_size, args.batch_size * args.k_image * 8 * 5)
-    data_transform, gt_transform = get_data_transforms(512,448)
+    data_transform, gt_transform = get_data_transforms(image_size, crop_size)
     protocol = {
         'bank_manifest_sha256': checkpoint_fingerprint(Path(args.bank_path) / 'manifest.json'),
         'checkpoint_sha256': checkpoint_sha, 'encoder_name': args.encoder_name,
-        'layers': bank.layers, 'image_size': 512, 'crop_size': 448, 'seed': 1,
+        'layers': bank.layers, 'image_size': image_size, 'crop_size': crop_size, 'seed': 1,
+        'h5_direct_448': bool(args.h5_direct_448),
         'k_image': args.k_image, 'resize_mask': args.resize_mask, 'max_ratio': args.max_ratio,
         'use_positional_bank': args.use_positional_bank, 'pos_radius': args.pos_radius,
         'layer_weights': args.layer_weights, 'dataset_kind': 'CoBRA-HDF5:'+args.h5_dataset if args.h5_dataset else ('Real-IAD' if realiad else 'MVTec-format'),
