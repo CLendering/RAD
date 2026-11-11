@@ -111,7 +111,7 @@ def dataset_reference(dataset, index, categories, data_root):
 
 
 def build_provenance(*, encoder_name, checkpoint_path, image_size, crop_size, categories,
-                     reference_records, source_file=None, guard=None):
+                     reference_records, source_file=None, guard=None, preprocessing=None):
     """Stream source fingerprints in exact dataset order; retain no record list."""
     digest = hashlib.sha256()
     count = 0
@@ -131,12 +131,13 @@ def build_provenance(*, encoder_name, checkpoint_path, image_size, crop_size, ca
     source = {'commit': revision, 'rad_bank_sha256': checkpoint_fingerprint(__file__)}
     if source_file is not None:
         source['builder_sha256'] = checkpoint_fingerprint(source_file)
+    default_preprocessing = {'image_size': int(image_size), 'crop_size': int(crop_size),
+                             'resize': 'square', 'interpolation': 'bilinear',
+                             'order': ['Resize', 'ToTensor', 'CenterCrop', 'Normalize'],
+                             'mean': [0.485, 0.456, 0.406], 'std': [0.229, 0.224, 0.225]}
     return {
         'encoder': {'name': encoder_name, 'checkpoint_sha256': checkpoint_fingerprint(checkpoint_path)},
-        'preprocessing': {'image_size': int(image_size), 'crop_size': int(crop_size),
-                          'resize': 'square', 'interpolation': 'bilinear',
-                          'order': ['Resize', 'ToTensor', 'CenterCrop', 'Normalize'],
-                          'mean': [0.485, 0.456, 0.406], 'std': [0.229, 0.224, 0.225]},
+        'preprocessing': default_preprocessing if preprocessing is None else preprocessing,
         'categories': list(categories), 'references_sha256': digest.hexdigest(),
         'reference_count': count, 'source_revision': source,
         'max_source_image_pixels': max_source_pixels,
