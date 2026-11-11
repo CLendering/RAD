@@ -73,7 +73,7 @@ if [[ "${STAGE}" == bank ]]; then
         --encoder_weight "${WEIGHT}" \
         --image_size 512 --crop_size 448 \
         --layer_idx_list 3 6 9 11 \
-        --batch_size "${RAD_BANK_BATCH:-8}" --num_workers 4 \
+        --batch_size "${RAD_BANK_BATCH:-32}" --num_workers 4 \
         --bank_path "${BANK}" "${RESUME[@]}"
   fi
   python scripts/report_h5.py --bank "${BANK}" \
@@ -94,7 +94,7 @@ elif [[ "${STAGE}" == eval ]]; then
         --save_name "${DATASET}_k${K}_r${R}" \
         --k_image "${K}" --resize_mask 256 --max_ratio 0.01 \
         --vis_max 0 --use_positional_bank --pos_radius "${R}" \
-        --batch_size "${RAD_EVAL_BATCH:-2}" --num_workers 4 \
+        --batch_size "${RAD_EVAL_BATCH:-8}" --num_workers 4 \
         --item_list "${CATEGORIES[@]}" "${RESUME[@]}"
   else
     echo "Evaluation already complete: ${OUT}"
