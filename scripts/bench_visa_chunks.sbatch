@@ -12,7 +12,8 @@ set -euo pipefail
 
 PROJECT="${RAD_PROJECT:-/projects/0/prjs2349}"
 SCRATCH="${RAD_SCRATCH:-/scratch-shared/${USER}/rad}"
-REPO="${PROJECT}/RAD"
+# A separate worktree avoids changing code/provenance while large bank builds run.
+REPO="${RAD_BENCH_REPO:-${PROJECT}/RAD}"
 BANK="${SCRATCH}/banks/visa_dinov3_b16_bicubic448nocrop"
 ROOT="${PROJECT}/datasets_h5/VisA_processed"
 WEIGHT="${RAD_WEIGHT:-${PROJECT}/weights/dinov3_vitb16_pretrain_lvd1689m-73cec8be.pth}"
@@ -22,7 +23,7 @@ test -f "${BANK}/manifest.json" || { echo "Missing completed VisA bank: ${BANK}"
 module purge
 module load 2024
 module load Python/3.12.3-GCCcore-13.3.0
-source "${REPO}/.venv/bin/activate"
+source "${PROJECT}/RAD/.venv/bin/activate"
 export PYTHONPATH="${PROJECT}/cobra-source:${PYTHONPATH:-}"
 export COBRA_DATA_SCRATCH=0
 export RAD_PROFILE=1
