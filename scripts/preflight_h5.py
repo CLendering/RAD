@@ -11,8 +11,8 @@ import sys
 # Direct execution by path puts scripts/, not the RAD root, on sys.path.
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from dataset import get_data_transforms
-from rad_h5 import categories_for, grouped_samples, make_training, make_test, manifest_for
+from rad_h5 import (categories_for, grouped_samples, make_training,
+                    make_test, manifest_for, get_direct_448_transforms)
 from cobra.packed import open_image
 from cobra.data import MULTI_VIEW, object_ids
 
@@ -33,7 +33,7 @@ EXPECTED = {
     "realiad_variety": (19955, 178995, 160),
     "adnet": (116192, 80102, 380),
 }
-image_transform, mask_transform = get_data_transforms(512, 448)
+image_transform, mask_transform = get_direct_448_transforms()
 
 for dataset, folder in ROOTS.items():
     cats = categories_for(dataset, str(folder))
@@ -48,9 +48,8 @@ for dataset, folder in ROOTS.items():
         for example in (train[0], test[0]):
             with open_image(example.image_path, example.image_ref) as im:
                 assert im.size == (448, 448), (dataset, example.image_path, im.size)
-        print(f"WARNING {dataset}: HDF5 stores bicubic-resized 448x448 inputs; "
-              "RAD 512->448 will RESAMPLE them AGAIN. This is NOT an exact "
-              "reproduction of RAD preprocessing on original full-resolution inputs.",
+        print(f"INFO {dataset}: prepared 448x448; the bicubic 448 no-crop "
+              "RAD input transform is an identity geometric operation.",
               flush=True)
     else:
         assert prepared_size is None, (dataset, prepared_size)
@@ -63,12 +62,18 @@ for dataset, folder in ROOTS.items():
             print(f"INFO {dataset}: CoBRA HDF5 packer preserved the original "
                   "encoded images (prepared_size=null).", flush=True)
     assert all(s.label == 0 and s.mask_path is None for s in train), dataset
-    subset = [train[0], train[-1]]
     ds, sample_refs, records = make_training(dataset, str(folder), cats, image_transform)
     assert len(ds) == len(train)
     for index in (0, len(ds) - 1):
         im, label = ds[index]
         assert tuple(im.shape) == (3, 448, 448) and label == 0, dataset
+        from cobra.data import resize_image, IMAGENET_MEAN, IMAGENET_STD
+        from torchvision.transforms import ToTensor, Normalize
+        with open_image(train[index].image_path, train[index].image_ref) as raw:
+            expected = Normalize(IMAGENET_MEAN, IMAGENET_STD)(
+                ToTensor()(resize_image(raw, 448)))
+        import torch
+        torch.testing.assert_close(im, expected, rtol=0, atol=0)
     cat = cats[0]
     ev = make_test(dataset, str(folder), cat, image_transform, mask_transform)
     assert len(ev)
