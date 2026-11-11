@@ -32,9 +32,9 @@ case "${DATASET}" in
   mvtec) ROOT="${PROJECT}/datasets_h5/mvtec_anomaly_detection"; K=150; R=1 ;;
   visa) ROOT="${PROJECT}/datasets_h5/VisA_processed"; K=900; R=2 ;;
   realiad) ROOT="${PROJECT}/datasets_h5/Real_IAD/Real_IAD"; K=900; R=0 ;;
-  manta_tiny) ROOT="${PROJECT}/datasets_h5/manta_tiny_views"; K=150; R=1 ;;
-  realiad_variety) ROOT="${PROJECT}/datasets_h5/Real-IAD_Variety"; K=900; R=0 ;;
-  adnet) ROOT="${PROJECT}/datasets_h5/ADNet"; K=150; R=1 ;;
+  manta_tiny) ROOT="${PROJECT}/datasets_h5/manta_tiny_views"; K=256; R=1 ;;
+  realiad_variety) ROOT="${PROJECT}/datasets_h5/Real-IAD_Variety"; K=256; R=0 ;;
+  adnet) ROOT="${PROJECT}/datasets_h5/ADNet"; K=256; R=1 ;;
   *) echo "Unknown dataset ${DATASET}" >&2; exit 2 ;;
 esac
 # Override the published/transferred K for sensitivity studies without
