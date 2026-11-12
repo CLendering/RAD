@@ -204,7 +204,8 @@ def eval_patch_knn_multilayer_cluster(
         atomic_json(result_path, {'names': ['I-AUROC','I-AP','I-F1','P-AUROC','P-AP','P-F1','P-AUPRO'],
                                   'values': results, 'sample_count': metrics.num_samples,
                                   'retrieval_peak_reference_rows': retriever.peak_reference_rows,
-                                  'retrieval_peak_similarity_elements': retriever.peak_similarity_elements})
+                                  'retrieval_peak_similarity_elements': retriever.peak_similarity_elements,
+                                  'retrieval_profile': retriever.timing_report()})
         if cleanup_metric_spool:
             metrics.cleanup()
         return results

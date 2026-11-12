@@ -124,6 +124,10 @@ def main():
         description="Build MULTI-LAYER memory bank for MVTEC using DINOv3 encoder"
     )
     parser.add_argument('--data_path', type=str, default='../mvtec_anomaly_detection')
+    parser.add_argument('--h5-dataset', choices=('mvtec','visa','realiad','manta_tiny','realiad_variety','adnet'), default=None,
+                        help='Read immutable CoBRA HDF5 packs under data_path/h5_dataset; retain RAD defaults')
+    parser.add_argument('--h5-direct-448', action='store_true',
+                        help='Match CoBRA bicubic 448x448 image preprocessing without a center crop')
     parser.add_argument('--item_list', nargs='+', default=[
         'carpet', 'grid', 'leather', 'tile', 'wood',
         'bottle', 'cable', 'capsule', 'hazelnut', 'metal_nut',
@@ -150,6 +154,8 @@ def main():
     args = parser.parse_args()
 
     setup_seed(1)
+    if args.h5_direct_448 and (not args.h5_dataset or args.image_size != 448 or args.crop_size != 448):
+        raise ValueError('--h5-direct-448 requires an HDF5 dataset with image_size=crop_size=448')
 
     device = 'cuda:0' if torch.cuda.is_available() else 'cpu'
     print("device:", device)
@@ -164,31 +170,43 @@ def main():
     guard.preflight()
 
     # Data augmentation (consistent with training)
-    data_transform, _ = get_data_transforms(args.image_size, args.crop_size)
+    if args.h5_direct_448:
+        from rad_h5 import get_direct_448_transforms, direct_448_preprocessing
+        data_transform, _ = get_direct_448_transforms()
+        preprocessing = direct_448_preprocessing()
+    else:
+        data_transform, _ = get_data_transforms(args.image_size, args.crop_size)
+        preprocessing = None
 
-    # Build multi-category training set (all normal)
-    train_data_list = []
-    for i, item in enumerate(args.item_list):
-        train_path = os.path.join(args.data_path, item, 'train')
-        train_data = ImageFolder(root=train_path, transform=data_transform)
-        require_normal_training_split(train_data, item)
-
-        # Make labels non-conflicting and set them all to i for this item
-        train_data.classes = item
-        train_data.class_to_idx = {item: i}
-        train_data.samples = [(sample[0], i) for sample in train_data.samples]
-
-        train_data_list.append(train_data)
-
-    train_data = ConcatDataset(train_data_list)
+    # All normal observations, one category-agnostic bank. HDF5 uses only
+    # CoBRA's immutable image/record adapter, never CoBRA's scoring.
+    if args.h5_dataset:
+        from rad_h5 import make_training, h5_reference
+        train_data, h5_samples, h5_records = make_training(
+            args.h5_dataset, args.data_path, args.item_list, data_transform)
+        reference = lambda index: h5_reference(
+            h5_samples[index], index, args.item_list,
+            train_data.cumulative_sizes, h5_records)
+    else:
+        train_data_list = []
+        for i, item in enumerate(args.item_list):
+            train_path = os.path.join(args.data_path, item, 'train')
+            item_data = ImageFolder(root=train_path, transform=data_transform)
+            require_normal_training_split(item_data, item)
+            item_data.classes = item
+            item_data.class_to_idx = {item: i}
+            item_data.samples = [(sample[0], i) for sample in item_data.samples]
+            train_data_list.append(item_data)
+        train_data = ConcatDataset(train_data_list)
+        reference = None
     indexed_train_data = IndexedDataset(train_data)
     print("Total train images:", len(train_data))
-
-    reference = lambda index: dataset_reference(indexed_train_data, index, args.item_list, args.data_path)
+    if reference is None:
+        reference = lambda index: dataset_reference(indexed_train_data, index, args.item_list, args.data_path)
     provenance = build_provenance(encoder_name=args.encoder_name, checkpoint_path=args.encoder_weight,
                                   image_size=args.image_size, crop_size=args.crop_size, categories=args.item_list,
                                   reference_records=(reference(i) for i in range(len(train_data))),
-                                  source_file=__file__, guard=guard)
+                                  source_file=__file__, guard=guard, preprocessing=preprocessing)
     estimate = estimate_build_resources(encoder_name=args.encoder_name, checkpoint_path=args.encoder_weight,
         batch_size=args.batch_size, image_size=args.image_size, crop_size=args.crop_size,
         layers=args.layer_idx_list, num_workers=args.num_workers, device=device,
